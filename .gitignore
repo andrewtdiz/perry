@@ -57,6 +57,7 @@ tests/test-*
 !tests/test-*.sh
 !tests/test_copied_minor_fallback_report.py
 !tests/test_gc_1090_evidence_report.py
+!tests/test_gc_store_site_inventory.py
 !tests/test_perf_frontier_report.py
 !tests/test_perf_frontier_gate_smoke.sh
 !tests/*/

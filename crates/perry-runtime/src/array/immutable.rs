@@ -20,6 +20,7 @@ pub extern "C" fn js_array_to_reversed(arr: *const ArrayHeader) -> *mut ArrayHea
         (*new_arr).length = len as u32;
         let src = (arr as *const u8).add(std::mem::size_of::<ArrayHeader>()) as *const f64;
         let dst = (new_arr as *mut u8).add(std::mem::size_of::<ArrayHeader>()) as *mut f64;
+        // GC_STORE_AUDIT(INIT): unpublished reversed copy is rebuilt before return.
         for i in 0..len {
             *dst.add(i) = *src.add(len - 1 - i);
         }
@@ -47,6 +48,7 @@ pub extern "C" fn js_array_to_sorted_default(arr: *const ArrayHeader) -> *mut Ar
         (*new_arr).length = len as u32;
         let src = (arr as *const u8).add(std::mem::size_of::<ArrayHeader>()) as *const f64;
         let dst = (new_arr as *mut u8).add(std::mem::size_of::<ArrayHeader>()) as *mut f64;
+        // GC_STORE_AUDIT(INIT): unpublished sorted copy is rebuilt before sort/return.
         std::ptr::copy_nonoverlapping(src, dst, len);
         rebuild_array_layout(new_arr);
         // Sort the copy in-place using default sort
@@ -78,6 +80,7 @@ pub extern "C" fn js_array_to_sorted_with_comparator(
         (*new_arr).length = len as u32;
         let src = (arr as *const u8).add(std::mem::size_of::<ArrayHeader>()) as *const f64;
         let dst = (new_arr as *mut u8).add(std::mem::size_of::<ArrayHeader>()) as *mut f64;
+        // GC_STORE_AUDIT(INIT): unpublished comparator-sort copy is rebuilt before sort/return.
         std::ptr::copy_nonoverlapping(src, dst, len);
         rebuild_array_layout(new_arr);
         // Sort the copy in-place
@@ -130,6 +133,7 @@ pub extern "C" fn js_array_to_spliced(
         let dst = (new_arr as *mut u8).add(std::mem::size_of::<ArrayHeader>()) as *mut f64;
 
         // Copy elements before start
+        // GC_STORE_AUDIT(INIT): toSpliced prefix/items initialize an unpublished array before rebuild.
         for i in 0..s as usize {
             *dst.add(i) = *src.add(i);
         }
@@ -139,6 +143,7 @@ pub extern "C" fn js_array_to_spliced(
         }
         // Copy elements after deleted range
         let after_start = (s + dc) as usize;
+        // GC_STORE_AUDIT(INIT): toSpliced suffix initializes an unpublished array before rebuild.
         for i in after_start..len as usize {
             *dst.add(s as usize + items_count as usize + i - after_start) = *src.add(i);
         }
@@ -178,6 +183,7 @@ pub extern "C" fn js_array_with(
             (*new_arr).length = len as u32;
             let src = (arr as *const u8).add(std::mem::size_of::<ArrayHeader>()) as *const f64;
             let dst = (new_arr as *mut u8).add(std::mem::size_of::<ArrayHeader>()) as *mut f64;
+            // GC_STORE_AUDIT(INIT): unchanged with() fallback copy is rebuilt before return.
             std::ptr::copy_nonoverlapping(src, dst, len as usize);
             rebuild_array_layout(new_arr);
             return new_arr;
@@ -186,6 +192,7 @@ pub extern "C" fn js_array_with(
         let new_arr = js_array_alloc(len as u32);
         (*new_arr).length = len as u32;
         let dst = (new_arr as *mut u8).add(std::mem::size_of::<ArrayHeader>()) as *mut f64;
+        // GC_STORE_AUDIT(INIT): with() copy and replacement initialize unpublished storage before rebuild.
         std::ptr::copy_nonoverlapping(src, dst, len as usize);
         *dst.add(idx as usize) = value;
         rebuild_array_layout(new_arr);
@@ -246,6 +253,7 @@ pub extern "C" fn js_array_copy_within(
         }
 
         // Use memmove semantics (handles overlapping regions)
+        // GC_STORE_AUDIT(BARRIERED): copyWithin mutates in place then rebuilds array layout.
         std::ptr::copy(
             elements.add(s as usize),
             elements.add(t as usize),

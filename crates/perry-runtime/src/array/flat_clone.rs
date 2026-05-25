@@ -313,6 +313,7 @@ pub extern "C" fn js_array_clone(src: *const ArrayHeader) -> *mut ArrayHeader {
                 (src as *const u8).add(std::mem::size_of::<ArrayHeader>()) as *const f64;
             let dst_elements =
                 (result as *mut u8).add(std::mem::size_of::<ArrayHeader>()) as *mut f64;
+            // GC_STORE_AUDIT(INIT): unpublished clone storage is rebuilt exactly before return.
             ptr::copy_nonoverlapping(src_elements, dst_elements, len as usize);
             (*result).length = len;
             rebuild_array_layout_exact(result);
@@ -343,7 +344,9 @@ pub extern "C" fn js_array_entries(arr: *const ArrayHeader) -> *mut ArrayHeader 
             let pair = js_array_alloc(2);
             (*pair).length = 2;
             let pair_elems = (pair as *mut u8).add(std::mem::size_of::<ArrayHeader>()) as *mut f64;
+            // GC_STORE_AUDIT(POINTER_FREE): entries pair index materializes a raw numeric index only.
             *pair_elems.add(0) = i as f64;
+            // GC_STORE_AUDIT(BARRIERED): entries pair value and outer pair slots are followed by note_array_slot.
             *pair_elems.add(1) = *src_elements.add(i);
             note_array_slot(pair, 0, (i as f64).to_bits());
             note_array_slot(pair, 1, (*src_elements.add(i)).to_bits());
@@ -369,6 +372,7 @@ pub extern "C" fn js_array_keys(arr: *const ArrayHeader) -> *mut ArrayHeader {
         (*result).length = len;
         let dst_elements = (result as *mut u8).add(std::mem::size_of::<ArrayHeader>()) as *mut f64;
         for i in 0..len as usize {
+            // GC_STORE_AUDIT(POINTER_FREE): keys array materializes raw numeric indices only.
             *dst_elements.add(i) = i as f64;
         }
         result
@@ -392,6 +396,7 @@ pub extern "C" fn js_array_values(arr: *const ArrayHeader) -> *mut ArrayHeader {
                 (arr as *const u8).add(std::mem::size_of::<ArrayHeader>()) as *const f64;
             let dst_elements =
                 (result as *mut u8).add(std::mem::size_of::<ArrayHeader>()) as *mut f64;
+            // GC_STORE_AUDIT(INIT): unpublished values clone is rebuilt before return.
             ptr::copy_nonoverlapping(src_elements, dst_elements, len as usize);
             (*result).length = len;
             rebuild_array_layout(result);

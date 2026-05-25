@@ -56,6 +56,7 @@ pub extern "C" fn js_array_sort_default(arr: *mut ArrayHeader) -> *mut ArrayHead
         pairs.sort_by(|a, b| a.0.cmp(&b.0));
 
         for (i, (_, val)) in pairs.into_iter().enumerate() {
+            // GC_STORE_AUDIT(BARRIERED): default sort rewrites slots then rebuilds array layout.
             *elements_ptr.add(i) = val;
         }
         rebuild_array_layout(arr);
@@ -129,6 +130,7 @@ pub extern "C" fn js_array_sort_with_comparator(
                 while j >= 0 {
                     let cmp = cmp_with(comparator, direct_call, *elements_ptr.add(j as usize), key);
                     if cmp > 0.0 {
+                        // GC_STORE_AUDIT(BARRIERED): insertion-sort shifts run under unknown layout, rebuilt after sort.
                         ptr::write(
                             elements_ptr.add((j + 1) as usize),
                             *elements_ptr.add(j as usize),
@@ -138,6 +140,7 @@ pub extern "C" fn js_array_sort_with_comparator(
                         break;
                     }
                 }
+                // GC_STORE_AUDIT(BARRIERED): insertion-sort key write is covered by final layout rebuild.
                 ptr::write(elements_ptr.add((j + 1) as usize), key);
             }
         } else {
@@ -156,6 +159,7 @@ pub extern "C" fn js_array_sort_with_comparator(
                         let cmp =
                             cmp_with(comparator, direct_call, *elements_ptr.add(j as usize), key);
                         if cmp > 0.0 {
+                            // GC_STORE_AUDIT(BARRIERED): run-sort shifts under unknown layout, rebuilt after sort.
                             ptr::write(
                                 elements_ptr.add((j + 1) as usize),
                                 *elements_ptr.add(j as usize),
@@ -165,6 +169,7 @@ pub extern "C" fn js_array_sort_with_comparator(
                             break;
                         }
                     }
+                    // GC_STORE_AUDIT(BARRIERED): run-sort key write is covered by final layout rebuild.
                     ptr::write(elements_ptr.add((j + 1) as usize), key);
                 }
                 run_start = run_end;
@@ -189,6 +194,7 @@ pub extern "C" fn js_array_sort_with_comparator(
                     let mut k = left;
                     while l < mid && r < right {
                         let cmp = cmp_with(comparator, direct_call, *src.add(l), *src.add(r));
+                        // GC_STORE_AUDIT(BARRIERED): merge writes are to temp storage or rebuilt array slots.
                         if cmp <= 0.0 {
                             *dst.add(k) = *src.add(l);
                             l += 1;
@@ -199,11 +205,13 @@ pub extern "C" fn js_array_sort_with_comparator(
                         k += 1;
                     }
                     while l < mid {
+                        // GC_STORE_AUDIT(BARRIERED): left-tail merge writes are covered by final layout rebuild.
                         *dst.add(k) = *src.add(l);
                         l += 1;
                         k += 1;
                     }
                     while r < right {
+                        // GC_STORE_AUDIT(BARRIERED): right-tail merge writes are covered by final layout rebuild.
                         *dst.add(k) = *src.add(r);
                         r += 1;
                         k += 1;
@@ -218,6 +226,7 @@ pub extern "C" fn js_array_sort_with_comparator(
 
             // If final result is in buf, copy back to elements
             if src != elements_ptr {
+                // GC_STORE_AUDIT(BARRIERED): final merge copy is followed by array layout rebuild.
                 ptr::copy_nonoverlapping(src, elements_ptr, length);
             }
         }

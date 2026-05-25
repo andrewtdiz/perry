@@ -220,6 +220,7 @@ pub extern "C" fn js_array_set_f64_unchecked(arr: *mut ArrayHeader, index: u32, 
             return;
         }
         let elements_ptr = (arr as *mut u8).add(std::mem::size_of::<ArrayHeader>()) as *mut f64;
+        // GC_STORE_AUDIT(BARRIERED): unchecked array set is followed by note_array_slot.
         ptr::write(elements_ptr.add(index as usize), value);
         note_array_slot(arr, index as usize, value.to_bits());
     }
@@ -257,6 +258,7 @@ pub extern "C" fn js_array_set_f64(arr: *mut ArrayHeader, index: u32, value: f64
             return;
         }
         let elements_ptr = (arr as *mut u8).add(std::mem::size_of::<ArrayHeader>()) as *mut f64;
+        // GC_STORE_AUDIT(BARRIERED): bounded array set is followed by note_array_slot.
         ptr::write(elements_ptr.add(index as usize), value);
         note_array_slot(arr, index as usize, value.to_bits());
     }
@@ -302,6 +304,7 @@ pub extern "C" fn js_array_set_f64_extend(
         // If index is within bounds, just set it
         if index < length {
             let elements_ptr = (arr as *mut u8).add(std::mem::size_of::<ArrayHeader>()) as *mut f64;
+            // GC_STORE_AUDIT(BARRIERED): in-bounds extending set is followed by note_array_slot.
             ptr::write(elements_ptr.add(index as usize), value);
             note_array_slot(arr, index as usize, value.to_bits());
             return arr;
@@ -326,11 +329,13 @@ pub extern "C" fn js_array_set_f64_extend(
         let elements_ptr = (arr as *mut u8).add(std::mem::size_of::<ArrayHeader>()) as *mut f64;
         let hole = f64::from_bits(crate::value::TAG_HOLE);
         for i in length..index {
+            // GC_STORE_AUDIT(POINTER_FREE): sparse extension gaps write the TAG_HOLE sentinel only.
             ptr::write(elements_ptr.add(i as usize), hole);
             note_array_slot(arr, i as usize, crate::value::TAG_HOLE);
         }
 
         // Set the value
+        // GC_STORE_AUDIT(BARRIERED): extended value slot is followed by note_array_slot.
         ptr::write(elements_ptr.add(index as usize), value);
         note_array_slot(arr, index as usize, value.to_bits());
         (*arr).length = new_length;

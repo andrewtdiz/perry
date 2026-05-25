@@ -30,6 +30,7 @@ pub extern "C" fn js_array_grow(arr: *mut ArrayHeader, min_capacity: u32) -> *mu
         // Allocate new from arena and copy old data.
         let new_ptr = arena_alloc_gc(new_size, 8, crate::gc::GC_TYPE_ARRAY) as *mut ArrayHeader;
         let arr = arr_handle.get_raw_mut_ptr::<ArrayHeader>();
+        // GC_STORE_AUDIT(BARRIERED): array growth transfers layout metadata and replays barriers after copy.
         ptr::copy_nonoverlapping(arr as *const u8, new_ptr as *mut u8, old_size);
 
         (*new_ptr).capacity = new_capacity;
@@ -110,6 +111,7 @@ pub extern "C" fn js_array_push_f64(arr: *mut ArrayHeader, value: f64) -> *mut A
         }
 
         let elements_ptr = (arr as *mut u8).add(std::mem::size_of::<ArrayHeader>()) as *mut f64;
+        // GC_STORE_AUDIT(BARRIERED): push slot is followed by note_array_slot.
         ptr::write(elements_ptr.add(length as usize), value);
         note_array_slot(arr, length as usize, value.to_bits());
         (*arr).length = length + 1;
@@ -131,6 +133,7 @@ unsafe fn js_array_push_f64_grow(
     let value = value_handle.get_nanbox_f64();
 
     let elements_ptr = (arr as *mut u8).add(std::mem::size_of::<ArrayHeader>()) as *mut f64;
+    // GC_STORE_AUDIT(BARRIERED): grown push slot is followed by note_array_slot.
     ptr::write(elements_ptr.add(length as usize), value);
     note_array_slot(arr, length as usize, value.to_bits());
     (*arr).length = length + 1;
@@ -245,6 +248,7 @@ pub extern "C" fn js_array_set_length(arr: *mut ArrayHeader, new_length: f64) {
             const TAG_UNDEFINED_F64: f64 = f64::from_bits(0x7FFC_0000_0000_0001u64);
             let elements_ptr = (arr as *mut u8).add(std::mem::size_of::<ArrayHeader>()) as *mut f64;
             for i in n..cur {
+                // GC_STORE_AUDIT(POINTER_FREE): truncation writes the TAG_UNDEFINED sentinel only.
                 std::ptr::write(elements_ptr.add(i as usize), TAG_UNDEFINED_F64);
                 note_array_slot(arr, i as usize, TAG_UNDEFINED_F64.to_bits());
             }
@@ -265,6 +269,7 @@ pub extern "C" fn js_array_set_length(arr: *mut ArrayHeader, new_length: f64) {
                 let elements_ptr =
                     (target as *mut u8).add(std::mem::size_of::<ArrayHeader>()) as *mut f64;
                 for i in cur..n {
+                    // GC_STORE_AUDIT(POINTER_FREE): length extension pads with the TAG_UNDEFINED sentinel only.
                     std::ptr::write(elements_ptr.add(i as usize), TAG_UNDEFINED_F64);
                     note_array_slot(target, i as usize, TAG_UNDEFINED_F64.to_bits());
                 }
@@ -292,6 +297,7 @@ pub extern "C" fn js_array_delete(arr: *mut ArrayHeader, index: u32) -> i32 {
         }
         const TAG_UNDEFINED_F64: f64 = f64::from_bits(0x7FFC_0000_0000_0001u64);
         let elements_ptr = (arr as *mut u8).add(std::mem::size_of::<ArrayHeader>()) as *mut f64;
+        // GC_STORE_AUDIT(POINTER_FREE): delete writes the TAG_UNDEFINED sentinel only.
         std::ptr::write(elements_ptr.add(index as usize), TAG_UNDEFINED_F64);
         note_array_slot(arr, index as usize, TAG_UNDEFINED_F64.to_bits());
         1
@@ -321,6 +327,7 @@ pub extern "C" fn js_array_shift_f64(arr: *mut ArrayHeader) -> f64 {
         let value = *elements_ptr;
 
         // Shift all elements down
+        // GC_STORE_AUDIT(BARRIERED): shift compacts slots then rebuilds array layout.
         ptr::copy(elements_ptr.add(1), elements_ptr, (length - 1) as usize);
         (*arr).length = length - 1;
         rebuild_array_layout(arr);
@@ -353,6 +360,7 @@ pub extern "C" fn js_array_unshift_f64(arr: *mut ArrayHeader, value: f64) -> *mu
         let elements_ptr = (arr as *mut u8).add(std::mem::size_of::<ArrayHeader>()) as *mut f64;
 
         // Shift all elements up
+        // GC_STORE_AUDIT(BARRIERED): unshift shifts and inserts before rebuilding array layout.
         ptr::copy(elements_ptr, elements_ptr.add(1), length as usize);
         // Write new element at beginning
         ptr::write(elements_ptr, value);
