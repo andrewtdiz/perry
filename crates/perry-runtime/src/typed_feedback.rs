@@ -28,9 +28,10 @@ pub enum TypedFeedbackSiteKind {
     PropertyGet = 0,
     PropertySet = 1,
     MethodCall = 2,
-    ArrayElement = 3,
-    NumericFieldWrite = 4,
-    HelperReturn = 5,
+    ClosureCall = 3,
+    ArrayElement = 4,
+    NumericFieldWrite = 5,
+    HelperReturn = 6,
 }
 
 impl TypedFeedbackSiteKind {
@@ -38,9 +39,10 @@ impl TypedFeedbackSiteKind {
         match raw {
             1 => Self::PropertySet,
             2 => Self::MethodCall,
-            3 => Self::ArrayElement,
-            4 => Self::NumericFieldWrite,
-            5 => Self::HelperReturn,
+            3 => Self::ClosureCall,
+            4 => Self::ArrayElement,
+            5 => Self::NumericFieldWrite,
+            6 => Self::HelperReturn,
             _ => Self::PropertyGet,
         }
     }
@@ -50,6 +52,7 @@ impl TypedFeedbackSiteKind {
             Self::PropertyGet => "property_get",
             Self::PropertySet => "property_set",
             Self::MethodCall => "method_call",
+            Self::ClosureCall => "closure_call",
             Self::ArrayElement => "array_element",
             Self::NumericFieldWrite => "numeric_field_write",
             Self::HelperReturn => "helper_return",
@@ -80,6 +83,7 @@ impl TypedFeedbackState {
 enum ObservationSource {
     Property,
     Method,
+    Closure,
     Array,
     NumericWrite,
     HelperReturn,
@@ -115,6 +119,11 @@ impl Observation {
                     && self.class_id == other.class_id
                     && self.heap_type == other.heap_type
                     && self.aux == other.aux
+                    && self.value_tag == other.value_tag
+            }
+            ObservationSource::Closure => {
+                self.aux == other.aux
+                    && self.heap_type == other.heap_type
                     && self.value_tag == other.value_tag
             }
             ObservationSource::Array | ObservationSource::HelperReturn => {
@@ -1419,6 +1428,63 @@ pub unsafe extern "C" fn js_typed_feedback_native_call_method_apply(
     crate::object::js_native_call_method_apply(object, method_name_ptr, method_name_len, args_array)
 }
 
+#[no_mangle]
+pub extern "C" fn js_typed_feedback_closure_direct_call_guard(
+    site_id: u64,
+    closure_value: f64,
+    expected_func_ptr: *const u8,
+    expected_arity: u32,
+    call_arity: u32,
+) -> i32 {
+    let bits = closure_value.to_bits();
+    let raw_ptr = if (bits & TAG_MASK) == POINTER_TAG {
+        (bits & POINTER_MASK) as *const crate::closure::ClosureHeader
+    } else if (bits >> 48) == 0 && bits >= 0x10000 {
+        bits as *const crate::closure::ClosureHeader
+    } else {
+        std::ptr::null()
+    };
+    let closure_ptr = crate::closure::clean_closure_ptr(raw_ptr);
+    let func_ptr = crate::closure::get_valid_func_ptr(closure_ptr);
+    let has_rest = !func_ptr.is_null() && crate::closure::lookup_closure_rest(func_ptr).is_some();
+    let declared = if func_ptr.is_null() {
+        None
+    } else {
+        crate::closure::lookup_closure_arity(func_ptr)
+    };
+    let contract_valid = !expected_func_ptr.is_null()
+        && !func_ptr.is_null()
+        && func_ptr == expected_func_ptr
+        && func_ptr != crate::closure::BOUND_METHOD_FUNC_PTR
+        && !has_rest
+        && declared.unwrap_or(expected_arity) == expected_arity
+        && expected_arity == call_arity;
+    let observation = Observation {
+        source: ObservationSource::Closure,
+        object_addr: 0,
+        shape_addr: 0,
+        key_hash: 0,
+        class_id: 0,
+        heap_type: if func_ptr.is_null() {
+            0
+        } else {
+            crate::gc::GC_TYPE_CLOSURE as u16
+        },
+        aux: func_ptr as u64,
+        value_tag: stable_value_kind(bits),
+    };
+    if guard_observe(
+        site_id,
+        TypedFeedbackSiteKind::ClosureCall,
+        observation,
+        contract_valid,
+    ) {
+        1
+    } else {
+        0
+    }
+}
+
 fn observe_array(site_id: u64, arr: *const ArrayHeader, index: u32) {
     let raw_addr = normalize_raw_object_addr(arr as u64);
     let (class_id, heap_type, aux, element_kind) = classify_array(raw_addr, Some(index));
@@ -2077,6 +2143,17 @@ mod tests {
         f64::from_bits(crate::value::TAG_UNDEFINED)
     }
 
+    extern "C" fn test_direct_closure(
+        _closure: *const crate::closure::ClosureHeader,
+        arg: f64,
+    ) -> f64 {
+        arg
+    }
+
+    fn test_direct_closure_ptr() -> *const u8 {
+        test_direct_closure as *const () as *const u8
+    }
+
     fn register(site_id: u64, kind: TypedFeedbackSiteKind, op: &'static str) {
         js_typed_feedback_register_site(
             site_id,
@@ -2321,6 +2398,7 @@ mod tests {
             TypedFeedbackSiteKind::PropertyGet,
             TypedFeedbackSiteKind::PropertySet,
             TypedFeedbackSiteKind::MethodCall,
+            TypedFeedbackSiteKind::ClosureCall,
             TypedFeedbackSiteKind::ArrayElement,
             TypedFeedbackSiteKind::NumericFieldWrite,
             TypedFeedbackSiteKind::HelperReturn,
@@ -2609,6 +2687,29 @@ mod tests {
         assert_eq!(site.guard_passes, 0);
         assert_eq!(site.guard_failures, 1);
         assert_eq!(site.fallback_calls, 1);
+    }
+
+    #[test]
+    fn typed_feedback_closure_direct_guard_passes_and_rejects_bound_sentinel() {
+        let _guard = TYPED_FEEDBACK_TEST_LOCK.lock().unwrap();
+        reset_typed_feedback_for_tests();
+        register(66, TypedFeedbackSiteKind::ClosureCall, "cb()");
+
+        let fn_ptr = test_direct_closure_ptr();
+        crate::closure::js_register_closure_arity(fn_ptr, 1);
+        let closure = crate::closure::js_closure_alloc_singleton(fn_ptr);
+        let closure_value = crate::value::js_nanbox_pointer(closure as i64);
+        let pass = js_typed_feedback_closure_direct_call_guard(66, closure_value, fn_ptr, 1, 1);
+        assert_eq!(pass, 1);
+
+        let bound = crate::closure::js_closure_alloc(crate::closure::BOUND_METHOD_FUNC_PTR, 0);
+        let bound_value = crate::value::js_nanbox_pointer(bound as i64);
+        let fail = js_typed_feedback_closure_direct_call_guard(66, bound_value, fn_ptr, 1, 1);
+        assert_eq!(fail, 0);
+
+        let site = &typed_feedback_snapshot().sites[0];
+        assert_eq!(site.guard_passes, 1);
+        assert_eq!(site.guard_failures, 1);
     }
 
     #[test]
