@@ -958,6 +958,17 @@ fn valid_method_name(method_name_ptr: *const i8, method_name_len: usize) -> bool
     !method_name_ptr.is_null() && method_name_len > 0 && method_name_len <= 4096
 }
 
+fn method_name_bytes<'a>(method_name_ptr: *const i8, method_name_len: usize) -> Option<&'a [u8]> {
+    if !valid_method_name(method_name_ptr, method_name_len) {
+        return None;
+    }
+    Some(unsafe { std::slice::from_raw_parts(method_name_ptr as *const u8, method_name_len) })
+}
+
+fn method_name_str<'a>(method_name_ptr: *const i8, method_name_len: usize) -> Option<&'a str> {
+    std::str::from_utf8(method_name_bytes(method_name_ptr, method_name_len)?).ok()
+}
+
 fn is_plain_number_bits(bits: u64) -> bool {
     stable_value_kind(bits) == STABLE_VALUE_NUMBER
 }
@@ -1026,6 +1037,154 @@ fn object_key_matches_field(
             && !stored.as_string_ptr().is_null()
             && crate::string::js_string_equals(key, stored.as_string_ptr()) != 0
     }
+}
+
+fn object_has_own_key_bytes(obj: *const ObjectHeader, key_bytes: &[u8]) -> bool {
+    if obj.is_null() || key_bytes.is_empty() || key_bytes.len() > 4096 {
+        return false;
+    }
+    let object_addr = normalize_raw_object_addr(obj as u64);
+    let (shape_addr, _, heap_type) = object_shape(object_addr);
+    if heap_type != crate::gc::GC_TYPE_OBJECT as u16 || shape_addr == 0 {
+        return false;
+    }
+    unsafe {
+        let obj = object_addr as *const ObjectHeader;
+        let keys = (*obj).keys_array;
+        if keys.is_null() || keys as usize != shape_addr {
+            return false;
+        }
+        let key_count = crate::array::js_array_length(keys) as usize;
+        if key_count > 65_536 {
+            return true;
+        }
+        for i in 0..key_count {
+            let stored = crate::array::js_array_get(keys, i as u32);
+            if !stored.is_string() {
+                continue;
+            }
+            let string = stored.as_string_ptr();
+            if string.is_null() {
+                continue;
+            }
+            let len = (*string).byte_len as usize;
+            if len != key_bytes.len() {
+                continue;
+            }
+            let data = (string as *const u8).add(std::mem::size_of::<crate::StringHeader>());
+            if std::slice::from_raw_parts(data, len) == key_bytes {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+fn vtable_method_matches(class_id: u32, method_name: &str, expected_func_ptr: usize) -> bool {
+    if class_id == 0 || expected_func_ptr == 0 {
+        return false;
+    }
+    let Ok(registry) = crate::object::CLASS_VTABLE_REGISTRY.read() else {
+        return false;
+    };
+    let Some(registry) = registry.as_ref() else {
+        return false;
+    };
+    let mut cid = class_id;
+    for _ in 0..32 {
+        if let Some(vtable) = registry.get(&cid) {
+            if let Some(entry) = vtable.methods.get(method_name) {
+                return entry.func_ptr == expected_func_ptr;
+            }
+        }
+        match crate::object::get_parent_class_id(cid) {
+            Some(parent) if parent != 0 && parent != cid => cid = parent,
+            _ => break,
+        }
+    }
+    false
+}
+
+fn prototype_may_override_method(class_id: u32, method_name: &str, method_bytes: &[u8]) -> bool {
+    if class_id == 0 {
+        return false;
+    }
+    if crate::object::lookup_prototype_method(class_id, method_name).is_some() {
+        return true;
+    }
+    let mut cid = class_id;
+    for _ in 0..32 {
+        let proto = crate::object::class_prototype_object(cid);
+        if !proto.is_null() && object_has_own_key_bytes(proto, method_bytes) {
+            return true;
+        }
+        match crate::object::get_parent_class_id(cid) {
+            Some(parent) if parent != 0 && parent != cid => cid = parent,
+            _ => break,
+        }
+    }
+    false
+}
+
+fn method_direct_call_contract(
+    receiver: f64,
+    expected_class_id: u32,
+    expected_keys: *const ArrayHeader,
+    method_name_ptr: *const i8,
+    method_name_len: usize,
+    expected_func_ptr: *const u8,
+) -> (usize, u32, u16, u64, bool) {
+    let object_addr = normalize_raw_object_addr(receiver.to_bits());
+    let (shape_addr, class_id, gc_type) = object_shape(object_addr);
+    let Some(method_bytes) = method_name_bytes(method_name_ptr, method_name_len) else {
+        return (shape_addr, class_id, gc_type, 0, false);
+    };
+    let Some(method_name) = method_name_str(method_name_ptr, method_name_len) else {
+        return (
+            shape_addr,
+            class_id,
+            gc_type,
+            hash_bytes(method_bytes),
+            false,
+        );
+    };
+    let name_hash = hash_bytes(method_bytes);
+    if object_addr == 0
+        || expected_class_id == 0
+        || expected_keys.is_null()
+        || expected_func_ptr.is_null()
+    {
+        return (shape_addr, class_id, gc_type, name_hash, false);
+    }
+    let Some(gc_header) = gc_header_for_user_addr(object_addr) else {
+        return (shape_addr, class_id, gc_type, name_hash, false);
+    };
+    unsafe {
+        if (*gc_header).obj_type != crate::gc::GC_TYPE_OBJECT
+            || (*gc_header).gc_flags & crate::gc::GC_FLAG_FORWARDED != 0
+        {
+            return (shape_addr, class_id, gc_type, name_hash, false);
+        }
+        let obj = object_addr as *const ObjectHeader;
+        if (*obj).object_type != crate::error::OBJECT_TYPE_REGULAR {
+            return (shape_addr, class_id, gc_type, name_hash, false);
+        }
+        if (*obj).class_id == crate::object::NATIVE_MODULE_CLASS_ID
+            || (*obj).class_id != expected_class_id
+            || (*obj).keys_array as usize != expected_keys as usize
+            || shape_addr != expected_keys as usize
+        {
+            return (shape_addr, class_id, gc_type, name_hash, false);
+        }
+        if object_has_own_key_bytes(obj, method_bytes) {
+            return (shape_addr, class_id, gc_type, name_hash, false);
+        }
+    }
+
+    let expected_func = expected_func_ptr as usize;
+    let valid = vtable_method_matches(class_id, method_name, expected_func)
+        && !prototype_may_override_method(class_id, method_name, method_bytes);
+    (shape_addr, class_id, gc_type, name_hash, valid)
 }
 
 fn key_as_str(key: *const crate::StringHeader) -> Option<String> {
@@ -1426,6 +1585,48 @@ pub unsafe extern "C" fn js_typed_feedback_native_call_method_apply(
         record_fallback_call(site_id);
     }
     crate::object::js_native_call_method_apply(object, method_name_ptr, method_name_len, args_array)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn js_typed_feedback_method_direct_call_guard(
+    site_id: u64,
+    receiver: f64,
+    expected_class_id: u32,
+    expected_keys: *const ArrayHeader,
+    method_name_ptr: *const i8,
+    method_name_len: usize,
+    expected_func_ptr: *const u8,
+) -> i32 {
+    let bits = receiver.to_bits();
+    let (shape_addr, class_id, gc_type, name_hash, contract_valid) = method_direct_call_contract(
+        receiver,
+        expected_class_id,
+        expected_keys,
+        method_name_ptr,
+        method_name_len,
+        expected_func_ptr,
+    );
+    let object_addr = normalize_raw_object_addr(bits);
+    let observation = Observation {
+        source: ObservationSource::Method,
+        object_addr: shape_keyed_object_addr(ObservationSource::Method, object_addr),
+        shape_addr,
+        key_hash: name_hash,
+        class_id,
+        heap_type: gc_type,
+        aux: expected_func_ptr as u64,
+        value_tag: value_tag(bits),
+    };
+    if guard_observe(
+        site_id,
+        TypedFeedbackSiteKind::MethodCall,
+        observation,
+        contract_valid,
+    ) {
+        1
+    } else {
+        0
+    }
 }
 
 #[no_mangle]
@@ -2143,6 +2344,10 @@ mod tests {
         f64::from_bits(crate::value::TAG_UNDEFINED)
     }
 
+    extern "C" fn test_direct_method(_this: f64, value: f64) -> f64 {
+        value
+    }
+
     extern "C" fn test_direct_closure(
         _closure: *const crate::closure::ClosureHeader,
         arg: f64,
@@ -2152,6 +2357,10 @@ mod tests {
 
     fn test_direct_closure_ptr() -> *const u8 {
         test_direct_closure as *const () as *const u8
+    }
+
+    fn test_direct_method_ptr() -> *const u8 {
+        test_direct_method as *const () as *const u8
     }
 
     fn register(site_id: u64, kind: TypedFeedbackSiteKind, op: &'static str) {
@@ -2196,6 +2405,16 @@ mod tests {
         let keys = unsafe { (*obj).keys_array };
         let receiver = crate::value::js_nanbox_pointer(obj as i64);
         (obj, keys, key, receiver)
+    }
+
+    unsafe fn register_test_method(class_id: u32, name: &'static [u8]) {
+        crate::object::js_register_class_method(
+            class_id as i64,
+            name.as_ptr(),
+            name.len() as i64,
+            test_direct_method as *const () as usize as i64,
+            1,
+        );
     }
 
     fn plain_object_with_key(
@@ -2687,6 +2906,177 @@ mod tests {
         assert_eq!(site.guard_passes, 0);
         assert_eq!(site.guard_failures, 1);
         assert_eq!(site.fallback_calls, 1);
+    }
+
+    #[test]
+    fn typed_feedback_method_direct_guard_passes_for_exact_registered_method() {
+        let _guard = TYPED_FEEDBACK_TEST_LOCK.lock().unwrap();
+        reset_typed_feedback_for_tests();
+        register(61, TypedFeedbackSiteKind::MethodCall, "obj.m()");
+
+        let class_id = 0x7EED_0061;
+        let (_, keys, _, receiver) = class_instance(class_id, b"x");
+        unsafe { register_test_method(class_id, b"m") };
+
+        let guard = unsafe {
+            js_typed_feedback_method_direct_call_guard(
+                61,
+                receiver,
+                class_id,
+                keys,
+                b"m".as_ptr() as *const i8,
+                1,
+                test_direct_method_ptr(),
+            )
+        };
+        assert_eq!(guard, 1);
+
+        let site = &typed_feedback_snapshot().sites[0];
+        assert_eq!(site.guard_passes, 1);
+        assert_eq!(site.guard_failures, 0);
+        assert_eq!(site.fallback_calls, 0);
+        assert_eq!(site.state, "monomorphic");
+    }
+
+    #[test]
+    fn typed_feedback_method_direct_guard_fails_for_own_method_replacement() {
+        let _guard = TYPED_FEEDBACK_TEST_LOCK.lock().unwrap();
+        reset_typed_feedback_for_tests();
+        register(62, TypedFeedbackSiteKind::MethodCall, "obj.m()");
+
+        let class_id = 0x7EED_0062;
+        let (obj, keys, _, receiver) = class_instance(class_id, b"x");
+        unsafe { register_test_method(class_id, b"m") };
+        let key_m = crate::string::js_string_from_bytes(b"m".as_ptr(), 1);
+        crate::object::js_object_set_field_by_name(obj, key_m, 123.0);
+
+        let guard = unsafe {
+            js_typed_feedback_method_direct_call_guard(
+                62,
+                receiver,
+                class_id,
+                keys,
+                b"m".as_ptr() as *const i8,
+                1,
+                test_direct_method_ptr(),
+            )
+        };
+        assert_eq!(guard, 0);
+        js_typed_feedback_record_fallback_call(62);
+
+        let site = &typed_feedback_snapshot().sites[0];
+        assert_eq!(site.guard_passes, 0);
+        assert_eq!(site.guard_failures, 1);
+        assert_eq!(site.fallback_calls, 1);
+    }
+
+    #[test]
+    fn typed_feedback_method_direct_guard_fails_for_prototype_method_registration() {
+        let _guard = TYPED_FEEDBACK_TEST_LOCK.lock().unwrap();
+        reset_typed_feedback_for_tests();
+        register(63, TypedFeedbackSiteKind::MethodCall, "obj.m()");
+
+        let class_id = 0x7EED_0063;
+        let (_, keys, _, receiver) = class_instance(class_id, b"x");
+        unsafe {
+            register_test_method(class_id, b"m");
+            crate::object::js_register_prototype_method(
+                class_id,
+                b"m".as_ptr(),
+                1,
+                f64::from_bits(crate::value::TAG_UNDEFINED),
+            );
+        }
+
+        let guard = unsafe {
+            js_typed_feedback_method_direct_call_guard(
+                63,
+                receiver,
+                class_id,
+                keys,
+                b"m".as_ptr() as *const i8,
+                1,
+                test_direct_method_ptr(),
+            )
+        };
+        assert_eq!(guard, 0);
+        js_typed_feedback_record_fallback_call(63);
+
+        let site = &typed_feedback_snapshot().sites[0];
+        assert_eq!(site.guard_passes, 0);
+        assert_eq!(site.guard_failures, 1);
+        assert_eq!(site.fallback_calls, 1);
+    }
+
+    #[test]
+    fn typed_feedback_method_direct_guard_fails_for_native_receiver() {
+        let _guard = TYPED_FEEDBACK_TEST_LOCK.lock().unwrap();
+        reset_typed_feedback_for_tests();
+        register(64, TypedFeedbackSiteKind::MethodCall, "native.m()");
+
+        let native = crate::object::js_object_alloc(crate::object::NATIVE_MODULE_CLASS_ID, 0);
+        let receiver = crate::value::js_nanbox_pointer(native as i64);
+
+        let guard = unsafe {
+            js_typed_feedback_method_direct_call_guard(
+                64,
+                receiver,
+                crate::object::NATIVE_MODULE_CLASS_ID,
+                std::ptr::null(),
+                b"m".as_ptr() as *const i8,
+                1,
+                test_direct_method_ptr(),
+            )
+        };
+        assert_eq!(guard, 0);
+        js_typed_feedback_record_fallback_call(64);
+
+        let site = &typed_feedback_snapshot().sites[0];
+        assert_eq!(site.guard_failures, 1);
+        assert_eq!(site.fallback_calls, 1);
+    }
+
+    #[test]
+    fn typed_feedback_method_direct_guard_fails_after_megamorphic_site() {
+        let _guard = TYPED_FEEDBACK_TEST_LOCK.lock().unwrap();
+        reset_typed_feedback_for_tests();
+        register(65, TypedFeedbackSiteKind::MethodCall, "obj.m()");
+        for i in 0..=POLYMORPHIC_CAP {
+            observe(
+                65,
+                TypedFeedbackSiteKind::MethodCall,
+                Observation {
+                    source: ObservationSource::Method,
+                    object_addr: 0,
+                    shape_addr: 0x1000 + i,
+                    key_hash: i as u64,
+                    class_id: i as u32 + 1,
+                    heap_type: crate::gc::GC_TYPE_OBJECT as u16,
+                    aux: i as u64,
+                    value_tag: STABLE_VALUE_POINTER,
+                },
+            );
+        }
+
+        let class_id = 0x7EED_0065;
+        let (_, keys, _, receiver) = class_instance(class_id, b"x");
+        unsafe { register_test_method(class_id, b"m") };
+        let guard = unsafe {
+            js_typed_feedback_method_direct_call_guard(
+                65,
+                receiver,
+                class_id,
+                keys,
+                b"m".as_ptr() as *const i8,
+                1,
+                test_direct_method_ptr(),
+            )
+        };
+        assert_eq!(guard, 0);
+
+        let site = &typed_feedback_snapshot().sites[0];
+        assert_eq!(site.state, "megamorphic");
+        assert_eq!(site.guard_failures, 1);
     }
 
     #[test]
