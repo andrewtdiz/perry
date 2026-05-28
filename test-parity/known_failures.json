@@ -272,12 +272,6 @@
     "category": "bug-open",
     "reason": "node:stream: `for await (chunk of readable)` iterates to empty — async iterator does not yield chunks. Flips to PASS when #1532 lands."
   },
-  "node-suite/stream/readable/object-mode": {
-    "issue": "1532",
-    "added": "2026-05-23",
-    "category": "bug-open",
-    "reason": "node:stream: Readable objectMode push/data events don't deliver. Flips to PASS when #1532 lands."
-  },
   "node-suite/stream/readable/set-encoding": {
     "issue": "1532",
     "added": "2026-05-23",
@@ -295,12 +289,6 @@
     "added": "2026-05-23",
     "category": "bug-open",
     "reason": "node:stream: write() return + drain event semantics not delivered. Flips to PASS when #1532 lands."
-  },
-  "node-suite/stream/object-mode/transform-object-mode": {
-    "issue": "1532",
-    "added": "2026-05-23",
-    "category": "bug-open",
-    "reason": "node:stream: Transform objectMode + data event chain doesn't deliver. Flips to PASS when #1532 lands."
   },
   "node-suite/stream/error/error-event": {
     "issue": "1532",
@@ -518,12 +506,6 @@
     "category": "bug-open",
     "reason": "node:stream: destroy(err) + error listener doesn't deliver the message to handler. Flips to PASS when #1532 lands."
   },
-  "node-suite/stream/object-mode/read-single-object": {
-    "issue": "1532",
-    "added": "2026-05-23",
-    "category": "bug-open",
-    "reason": "node:stream: read() on objectMode stream should return one object per call. Flips to PASS when #1532 lands."
-  },
   "node-suite/stream/async-iter/two-iterators-error": {
     "issue": "1532",
     "added": "2026-05-23",
@@ -565,12 +547,6 @@
     "added": "2026-05-23",
     "category": "bug-open",
     "reason": "node:stream: after error, end event should NOT fire. Flips to PASS when #1532 lands."
-  },
-  "node-suite/stream/object-mode/preserve-buffer": {
-    "issue": "1532",
-    "added": "2026-05-23",
-    "category": "bug-open",
-    "reason": "node:stream: objectMode does not preserve Buffer identity through data event. Flips to PASS when #1532 lands."
   },
   "node-suite/stream/options/auto-destroy-false": {
     "issue": "1531",
@@ -811,12 +787,6 @@
     "added": "2026-05-17",
     "category": "bug-open",
     "reason": "Regression test from #911 (express map undefined / http.METHODS). The METHODS property is now in the manifest (PR adding it alongside this entry); the test may still diverge from Node in the exact METHODS list shape. Re-evaluate once express compiles cleanly."
-  },
-  "node-suite/stream/readable/object-mode-read-returns-object": {
-    "issue": "1532",
-    "added": "2026-05-24",
-    "category": "bug-open",
-    "reason": "node:stream: objectMode Readable.read() does not return single object per call. Flips to PASS when #1532 lands."
   },
   "node-suite/stream/iter-helpers/map-async-rejection": {
     "issue": "1558",
@@ -1178,12 +1148,6 @@
     "category": "bug-open",
     "reason": "node:stream/web: ReadableStream.from(asyncGen()) — iteration wrong or fails. Flips to PASS when #1545 lands."
   },
-  "node-suite/stream/pipe/objectmode-pipe": {
-    "issue": "1532",
-    "added": "2026-05-24",
-    "category": "bug-open",
-    "reason": "node:stream: objectMode pipe — raw object data not preserved through pipe. Flips to PASS when #1532 lands."
-  },
   "node-suite/stream/readable/unshift-while-flowing": {
     "issue": "1532",
     "added": "2026-05-24",
@@ -1478,12 +1442,6 @@
     "category": "bug-open",
     "reason": "node:stream: pipeline with multiple async-gen stages — fails to deliver final collected output. Flips to PASS when #1532 lands."
   },
-  "node-suite/stream/transform/objectmode-passes-objects": {
-    "issue": "1539",
-    "added": "2026-05-24",
-    "category": "bug-open",
-    "reason": "node:stream: objectMode Transform — object data not preserved through transform. Flips to PASS when #1539 lands."
-  },
   "node-suite/stream/pipeline/null-cb-error-form": {
     "issue": "1532",
     "added": "2026-05-24",
@@ -1495,12 +1453,6 @@
     "added": "2026-05-24",
     "category": "bug-open",
     "reason": "node:stream: user _destroy(err, cb) — not invoked or receives wrong error. Flips to PASS when #1532 lands."
-  },
-  "node-suite/stream/readable/readable-event-with-objectmode": {
-    "issue": "1532",
-    "added": "2026-05-24",
-    "category": "bug-open",
-    "reason": "node:stream: objectMode 'readable' event — read() returns wrong object values. Flips to PASS when #1532 lands."
   },
   "node-suite/stream/readable/many-pushes-accumulate": {
     "issue": "1532",

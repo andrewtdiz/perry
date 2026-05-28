@@ -299,12 +299,16 @@ fn push_chunk(stream: f64, chunk: f64) -> f64 {
     if has_truthy_hidden(stream, hidden_ended_key()) {
         return f64::from_bits(TAG_FALSE);
     }
-    let added = chunk_byte_len(chunk) as f64;
+    let object_mode = readable_object_mode(stream);
+    let added = if object_mode {
+        1.0
+    } else {
+        chunk_byte_len(chunk) as f64
+    };
     let prev = get_hidden_value(stream, hidden_buffered_key()).unwrap_or(0.0);
     let total = prev + added;
-    set_hidden_value(stream, hidden_buffered_key(), total);
-    set_hidden_value(stream, hidden_key(b"readableLength"), total);
-    if added > 0.0 {
+    set_readable_buffered_len(stream, total);
+    if object_mode || added > 0.0 {
         push_readable_buffered_chunk(stream, chunk);
         mark_disturbed(stream);
         schedule_readable_event(stream);
@@ -314,7 +318,8 @@ fn push_chunk(stream: f64, chunk: f64) -> f64 {
             buffer_pending_readable_chunk(stream, chunk);
         }
     }
-    let hwm = get_hidden_value(stream, hidden_hwm_key()).unwrap_or_else(|| default_hwm(false));
+    let hwm =
+        get_hidden_value(stream, hidden_hwm_key()).unwrap_or_else(|| default_hwm(object_mode));
     if total < hwm {
         f64::from_bits(TAG_TRUE)
     } else {
@@ -2039,6 +2044,10 @@ fn has_truthy_hidden(stream: f64, key: *mut crate::string::StringHeader) -> bool
     get_hidden_value(stream, key).is_some_and(|v| crate::value::js_is_truthy(v) != 0)
 }
 
+fn readable_object_mode(stream: f64) -> bool {
+    has_truthy_hidden(stream, hidden_key(b"readableObjectMode"))
+}
+
 fn stream_destroyed(stream: f64) -> bool {
     has_truthy_hidden(stream, hidden_key(b"destroyed"))
 }
@@ -2121,6 +2130,14 @@ pub(super) fn readable_data_listener_added(stream: f64) {
     set_readable_flowing(stream, f64::from_bits(TAG_TRUE));
     flush_pending_readable_chunks(stream);
     schedule_readable_from_drain(stream);
+}
+
+pub(super) fn readable_listener_added(stream: f64) {
+    if get_hidden_value(stream, hidden_readable_flag_key()).is_none() || stream_destroyed(stream) {
+        return;
+    }
+    invoke_read_once(stream);
+    schedule_readable_event(stream);
 }
 
 fn schedule_readable_resume(stream: f64) {
@@ -2397,17 +2414,59 @@ fn push_readable_buffered_chunk(stream: f64, chunk: f64) {
     set_hidden_value(stream, hidden_chunks_key(), box_pointer(arr as *const u8));
 }
 
+fn set_readable_buffered_len(stream: f64, len: f64) {
+    set_hidden_value(stream, hidden_buffered_key(), len);
+    set_hidden_value(stream, hidden_key(b"readableLength"), len);
+}
+
 fn clear_readable_buffer(stream: f64) {
     set_hidden_value(
         stream,
         hidden_chunks_key(),
         box_pointer(crate::array::js_array_alloc(0) as *const u8),
     );
-    set_hidden_value(stream, hidden_buffered_key(), 0.0);
+    set_readable_buffered_len(stream, 0.0);
+}
+
+fn read_stream_object_mode(stream: f64) -> f64 {
+    let buffered = get_hidden_value(stream, hidden_buffered_key()).unwrap_or(0.0);
+    if buffered <= 0.0 {
+        if stream_hidden_ended(stream) {
+            refresh_readable_aborted_flag(stream);
+        }
+        return f64::from_bits(TAG_NULL);
+    }
+    let Some(chunks) = readable_hidden_chunks(stream) else {
+        set_readable_buffered_len(stream, 0.0);
+        return f64::from_bits(TAG_NULL);
+    };
+    if !is_array_like_value(chunks) {
+        clear_readable_buffer(stream);
+        mark_disturbed(stream);
+        return chunks;
+    }
+    let raw = raw_ptr_from_value(chunks);
+    if raw < 0x10000 {
+        set_readable_buffered_len(stream, 0.0);
+        return f64::from_bits(TAG_NULL);
+    }
+    let arr = raw as *mut crate::array::ArrayHeader;
+    if crate::array::js_array_length(arr) == 0 {
+        set_readable_buffered_len(stream, 0.0);
+        return f64::from_bits(TAG_NULL);
+    }
+    let chunk = crate::array::js_array_shift_f64(arr);
+    set_hidden_value(stream, hidden_chunks_key(), box_pointer(arr as *const u8));
+    set_readable_buffered_len(stream, (buffered - 1.0).max(0.0));
+    mark_disturbed(stream);
+    chunk
 }
 
 fn read_stream_default_size(stream: f64) -> f64 {
     invoke_read_once(stream);
+    if readable_object_mode(stream) {
+        return read_stream_object_mode(stream);
+    }
     if get_hidden_value(stream, hidden_buffered_key()).unwrap_or(0.0) <= 0.0 {
         if stream_hidden_ended(stream) {
             refresh_readable_aborted_flag(stream);
@@ -3888,3 +3947,7 @@ mod tests;
 #[cfg(test)]
 #[path = "node_stream_state_tests.rs"]
 mod state_tests;
+
+#[cfg(test)]
+#[path = "node_stream_object_mode_tests.rs"]
+mod object_mode_tests;
