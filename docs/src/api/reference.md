@@ -2,7 +2,7 @@
 
 This page is auto-generated from Perry's compile-time API manifest (`perry-api-manifest::API_MANIFEST`). It is the source of truth for what `perry compile` accepts; references to symbols not listed here produce `R005 UnimplementedApi` (issue #463). Stubs (#464) are flagged ⚠ — they link cleanly but no-op at runtime on the chosen target.
 
-Total: 1498 entries across 82 modules.
+Total: 1503 entries across 82 modules.
 
 ## Modules
 
@@ -2002,11 +2002,14 @@ Total: 1498 entries across 82 modules.
 - `isDate` — module
 - `isFloat32Array` — module
 - `isFloat64Array` — module
+- `isGeneratorFunction` — module
+- `isGeneratorObject` — module
 - `isInt16Array` — module
 - `isInt32Array` — module
 - `isInt8Array` — module
 - `isMap` — module
 - `isMapIterator` — module
+- `isNativeError` — module
 - `isNumberObject` — module
 - `isPromise` — module
 - `isProxy` — module
