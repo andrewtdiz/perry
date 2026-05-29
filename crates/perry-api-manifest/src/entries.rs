@@ -2564,6 +2564,7 @@ pub static API_MANIFEST: &[ApiEntry] = &[
     method("stream", "isPaused", true, None),
     method("stream", "destroy", true, None),
     method("stream", "setEncoding", true, None),
+    method("stream", "unshift", true, None),
     method("stream", "write", true, None),
     method("stream", "end", true, None),
     method("stream", "cork", true, None),
