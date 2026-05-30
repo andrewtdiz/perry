@@ -46,12 +46,14 @@ pub fn declare_phase_b_strings(module: &mut LlModule) {
     // All take/return raw i64 string handles. Length args are i32.
     // - js_string_index_of(haystack, needle) -> i32
     // - js_string_index_of_from(haystack, needle, from) -> i32
+    // - js_string_index_of_from_value(haystack, needle, fromValue) -> i32
     // - js_string_slice(s, start, end) -> *mut StringHeader (i64)
     // - js_string_substring(s, start, end) -> *mut StringHeader (i64)
     // - js_string_starts_with(s, prefix) -> i32 (boolean as 0/1)
     // - js_string_ends_with(s, suffix) -> i32
     module.declare_function("js_string_index_of", I32, &[I64, I64]);
     module.declare_function("js_string_index_of_from", I32, &[I64, I64, I32]);
+    module.declare_function("js_string_index_of_from_value", I32, &[I64, I64, DOUBLE]);
     module.declare_function("js_string_slice", I64, &[I64, I32, I32]);
     module.declare_function("js_string_substring", I64, &[I64, I32, I32]);
     module.declare_function("js_string_split", I64, &[I64, I64]);

@@ -799,8 +799,14 @@ pub unsafe extern "C" fn js_native_call_method(
                             crate::string::js_string_index_of_from(s_ptr, needle, from) as f64
                         }
                         "includes" => {
-                            let from = if args_len >= 2 { arg_i32(1) } else { 0 };
-                            let i = crate::string::js_string_index_of_from(s_ptr, needle, from);
+                            let i = if args_len >= 2 {
+                                let from_value = unsafe { *args_ptr.add(1) };
+                                crate::string::js_string_index_of_from_value(
+                                    s_ptr, needle, from_value,
+                                )
+                            } else {
+                                crate::string::js_string_index_of_from(s_ptr, needle, 0)
+                            };
                             f64::from_bits(JSValue::bool(i >= 0).bits())
                         }
                         "lastIndexOf" => {

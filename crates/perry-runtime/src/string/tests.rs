@@ -150,6 +150,25 @@ fn test_string_index_of() {
 }
 
 #[test]
+fn test_string_index_of_from_value_coercion() {
+    let s = js_string_from_bytes(b"ababa".as_ptr(), 5);
+    let a = js_string_from_bytes(b"a".as_ptr(), 1);
+    let b = js_string_from_bytes(b"b".as_ptr(), 1);
+    let empty = js_string_from_bytes(b"".as_ptr(), 0);
+
+    assert_eq!(js_string_index_of_from_value(s, a, 5.0), -1);
+    assert_eq!(js_string_index_of_from_value(s, a, f64::INFINITY), -1);
+    assert_eq!(js_string_index_of_from_value(s, a, f64::NAN), 0);
+    assert_eq!(js_string_index_of_from_value(s, a, -10.0), 0);
+    assert_eq!(js_string_index_of_from_value(s, b, 2.9), 3);
+    assert_eq!(js_string_index_of_from_value(s, empty, f64::INFINITY), 5);
+
+    let pos = js_string_from_bytes(b"2".as_ptr(), 1);
+    let pos_value = crate::value::js_nanbox_string(pos as i64);
+    assert_eq!(js_string_index_of_from_value(s, a, pos_value), 2);
+}
+
+#[test]
 fn test_string_last_index_of_from() {
     let s = js_string_from_bytes(b"abcabc".as_ptr(), 6);
     let c = js_string_from_bytes(b"c".as_ptr(), 1);

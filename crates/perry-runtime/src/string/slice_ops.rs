@@ -222,6 +222,28 @@ pub extern "C" fn js_string_index_of_from(
     }
 }
 
+/// `String.prototype.includes/search`-style start position coercion.
+///
+/// The codegen passes the original JS value so NaN/undefined become 0,
+/// +Infinity/huge values search from past the end, and finite values truncate
+/// toward zero without relying on LLVM fptosi behavior for non-finite doubles.
+#[no_mangle]
+pub extern "C" fn js_string_index_of_from_value(
+    haystack: *const StringHeader,
+    needle: *const StringHeader,
+    from_value: f64,
+) -> i32 {
+    let number = crate::builtins::js_number_coerce(from_value);
+    let from_index = if number.is_nan() || number <= 0.0 {
+        0
+    } else if number >= i32::MAX as f64 {
+        i32::MAX
+    } else {
+        number.trunc() as i32
+    };
+    js_string_index_of_from(haystack, needle, from_index)
+}
+
 /// Find the last index of a substring (-1 if not found).
 /// Returns the UTF-16 code unit offset of the LAST occurrence, or -1 if not found.
 /// An empty needle returns the string's UTF-16 length.
