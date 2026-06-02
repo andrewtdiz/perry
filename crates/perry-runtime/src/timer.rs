@@ -1101,6 +1101,7 @@ pub extern "C" fn js_callback_timer_tick() -> i32 {
                     }
                 }
             });
+            leave_timer_callback_dispatch();
             // #3870: Node runs a microtask checkpoint after *each* timer
             // callback (every callback is its own macrotask). Drain here —
             // rather than only once after the whole expired batch in the outer
@@ -1108,7 +1109,6 @@ pub extern "C" fn js_callback_timer_tick() -> i32 {
             // `queueMicrotask`/`Promise.then`) runs before the next timer fires,
             // matching Node's `setTimeout1 → micro → setTimeout2` ordering.
             crate::promise::microtasks::js_promise_run_microtasks_checkpoint();
-            leave_timer_callback_dispatch();
             crate::object::js_implicit_this_set(prev_this);
             crate::async_hooks::after(timer.async_id);
             crate::async_hooks::destroy(timer.async_id);

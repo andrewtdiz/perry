@@ -91,4 +91,50 @@ if ! grep -q '^done:180$' "$TMPDIR/run.log"; then
     exit 1
 fi
 
+cat > "$TMPDIR/nested-await-timer.ts" << 'EOF'
+let sentinel = 0;
+
+setTimeout(() => {
+  console.log("outer:timer");
+  Promise.resolve().then(async () => {
+    console.log("micro:start");
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    sentinel = 1;
+    console.log("micro:after");
+  });
+}, 0);
+
+setTimeout(() => {
+  console.log("sentinel:" + sentinel);
+  process.exit(sentinel === 1 ? 0 : 1);
+}, 20);
+EOF
+
+env PERRY_ALLOW_UNIMPLEMENTED=1 PERRY_NO_AUTO_OPTIMIZE=1 \
+    "$PERRY" compile --no-cache "$TMPDIR/nested-await-timer.ts" -o "$TMPDIR/nested_await_bin" \
+    >"$TMPDIR/nested-compile.log" 2>&1 || {
+        echo "FAIL: nested await timer compile failed"
+        sed 's/^/    /' "$TMPDIR/nested-compile.log" | tail -80
+        exit 1
+    }
+
+set +e
+run_with_timeout 5 "$TMPDIR/nested_await_bin" >"$TMPDIR/nested-run.log" 2>&1
+rc=$?
+set -e
+
+if [[ "$rc" -ne 0 ]]; then
+    echo "FAIL: nested await timer fixture exited with $rc"
+    sed 's/^/    /' "$TMPDIR/nested-run.log" | tail -120
+    exit 1
+fi
+
+for expected in outer:timer micro:start micro:after sentinel:1; do
+    if ! grep -q "^${expected}$" "$TMPDIR/nested-run.log"; then
+        echo "FAIL: nested await timer fixture missing ${expected}"
+        sed 's/^/    /' "$TMPDIR/nested-run.log" | tail -120
+        exit 1
+    fi
+done
+
 echo "PASS"
