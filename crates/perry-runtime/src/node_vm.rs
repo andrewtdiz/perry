@@ -916,9 +916,9 @@ fn new_plain_context() -> f64 {
     value
 }
 
-fn context_from_arg(value: f64, arg_name: &str) -> f64 {
+pub(crate) fn context_from_arg(value: f64, arg_name: &str) -> f64 {
     let jv = JSValue::from_bits(value.to_bits());
-    if jv.is_undefined() || is_dont_contextify(value) {
+    if jv.is_undefined() || jv.is_null() || is_dont_contextify(value) {
         return new_plain_context();
     }
     if object_ptr_from_value(value).is_none() {
