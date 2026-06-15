@@ -1055,23 +1055,23 @@ pub fn compile_module(hir: &HirModule, opts: CompileOptions) -> Result<Vec<u8>> 
         class_keys_globals: class_keys_globals_map,
         class_field_counts: class_field_counts_map,
         class_init_chains: class_init_chains_map,
-        imported_class_ctors: opts
-            .imported_classes
-            .iter()
-            .map(|ic| {
+        imported_class_ctors: {
+            let mut ctors = HashMap::new();
+            for ic in &opts.imported_classes {
                 let effective_name = ic.local_alias.as_deref().unwrap_or(&ic.name);
                 let ctor_name = format!("{}__{}_constructor", ic.source_prefix, ic.name);
-                (
-                    effective_name.to_string(),
-                    ImportedCtor {
+                ctors
+                    .entry(effective_name.to_string())
+                    .or_insert(ImportedCtor {
                         symbol: ctor_name,
-                        param_count: ic.constructor_param_count,
+                        own_param_count: ic.constructor_param_count,
+                        standalone_param_count: ic.standalone_constructor_param_count,
                         has_own_constructor: ic.has_own_constructor,
                         has_instance_fields: ic.has_instance_fields,
-                    },
-                )
-            })
-            .collect(),
+                    });
+            }
+            ctors
+        },
         // Per-module i18n lowering context. Built from `opts.i18n_table`
         // when i18n is configured; `None` otherwise. The
         // `Expr::I18nString` lowering pulls the right translation row at
@@ -1811,7 +1811,7 @@ pub fn compile_module(hir: &HirModule, opts: CompileOptions) -> Result<Vec<u8>> 
         // `<source_prefix>__<class>_constructor(i64 this, double arg0, …) → void`
         let ctor_fn = format!("{}__{}_constructor", sanitize(src), sanitize(&ic.name),);
         let mut ctor_params: Vec<crate::types::LlvmType> = vec![DOUBLE];
-        for _ in 0..ic.constructor_param_count {
+        for _ in 0..ic.standalone_constructor_param_count {
             ctor_params.push(DOUBLE);
         }
         llmod.declare_function(&ctor_fn, VOID, &ctor_params);

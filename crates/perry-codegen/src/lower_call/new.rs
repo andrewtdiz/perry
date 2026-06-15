@@ -344,7 +344,7 @@ fn effective_constructor_param_count(ctx: &FnCtx<'_>, class: &perry_hir::Class) 
     while let Some(pname) = parent {
         if let Some(ctor) = ctx.imported_class_ctors.get(pname) {
             if ctor.stops_constructor_walk() {
-                return ctor.param_count;
+                return ctor.standalone_param_count;
             }
         }
         match ctx.classes.get(pname).copied() {
@@ -1194,6 +1194,7 @@ pub(crate) fn lower_new(ctx: &mut FnCtx<'_>, class_name: &str, args: &[Expr]) ->
     } else {
         None
     };
+    let mut imported_ctor_stop_class: Option<String> = None;
     // Issue #740: synthesized `__perry_cap_<id>` ctor params (added by
     // `lower_class_decl` when a class declared inside a function captures
     // outer-scope locals) must be visible to field initializers, since
@@ -1537,7 +1538,7 @@ pub(crate) fn lower_new(ctx: &mut FnCtx<'_>, class_name: &str, args: &[Expr]) ->
                 // Walked to an ancestor — call its ctor with this and forwarded args.
                 let undef_lit =
                     crate::nanbox::double_literal(f64::from_bits(crate::nanbox::TAG_UNDEFINED));
-                while lowered_args.len() < ctor.param_count {
+                while lowered_args.len() < ctor.standalone_param_count {
                     lowered_args.push(undef_lit.clone());
                 }
                 let mut ctor_args: Vec<(crate::types::LlvmType, &str)> =
@@ -1555,12 +1556,13 @@ pub(crate) fn lower_new(ctx: &mut FnCtx<'_>, class_name: &str, args: &[Expr]) ->
                     ctor_param_types,
                 ));
                 ctx.block().call_void(&ctor.symbol, &ctor_args);
+                imported_ctor_stop_class = Some(effective_class_name.clone());
             } else if let Some(ctor) = ctx.imported_class_ctors.get(class_name).cloned() {
                 // Pad missing optional args with TAG_UNDEFINED so the constructor
                 // doesn't read garbage from stale registers.
                 let undef_lit =
                     crate::nanbox::double_literal(f64::from_bits(crate::nanbox::TAG_UNDEFINED));
-                while lowered_args.len() < ctor.param_count {
+                while lowered_args.len() < ctor.standalone_param_count {
                     lowered_args.push(undef_lit.clone());
                 }
                 // Pass `this` as NaN-boxed double (same as compile_method's this_arg).
@@ -1579,6 +1581,7 @@ pub(crate) fn lower_new(ctx: &mut FnCtx<'_>, class_name: &str, args: &[Expr]) ->
                     ctor_param_types,
                 ));
                 ctx.block().call_void(&ctor.symbol, &ctor_args);
+                imported_ctor_stop_class = Some(class_name.to_string());
             }
         } // end !found_inherited_ctor
     }
@@ -1609,7 +1612,7 @@ pub(crate) fn lower_new(ctx: &mut FnCtx<'_>, class_name: &str, args: &[Expr]) ->
     if !has_own_ctor && has_extends && !has_imported_ctor {
         if builtin_parent_runtime.is_some() || fetch_parent_runtime.is_some() {
             apply_field_initializers_recursive(ctx, class_name, FieldInitMode::SelfOnly)?;
-        } else if let Some(stop_at) = inherited_ctor_class {
+        } else if let Some(stop_at) = imported_ctor_stop_class.or(inherited_ctor_class) {
             apply_field_initializers_recursive(
                 ctx,
                 class_name,

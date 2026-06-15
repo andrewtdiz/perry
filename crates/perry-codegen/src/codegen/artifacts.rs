@@ -374,7 +374,7 @@ pub(super) fn emit_module_artifacts(c: ModuleArtifactsCtx<'_>) -> Result<()> {
                             break;
                         }
                         if let Some(imported_ctor) = imported_ctor {
-                            for i in 0..imported_ctor.constructor_param_count {
+                            for i in 0..imported_ctor.standalone_constructor_param_count {
                                 found_params.push(perry_hir::Param {
                                     id: 0xFFFF_0000 + i as u32,
                                     name: format!("__forward_arg{}", i),
@@ -393,7 +393,7 @@ pub(super) fn emit_module_artifacts(c: ModuleArtifactsCtx<'_>) -> Result<()> {
                         // Imported stub — params not in HIR; use effectful
                         // ctor metadata as a synthetic count of unnamed args.
                         if let Some(imported_ctor) = imported_ctor {
-                            for i in 0..imported_ctor.constructor_param_count {
+                            for i in 0..imported_ctor.standalone_constructor_param_count {
                                 found_params.push(perry_hir::Param {
                                     id: 0xFFFF_0000 + i as u32,
                                     name: format!("__forward_arg{}", i),

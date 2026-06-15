@@ -805,7 +805,7 @@ pub(crate) fn lower(ctx: &mut FnCtx<'_>, expr: &Expr) -> Result<String> {
                 // silently drops `super(...)` for imported parents and the subclass
                 // ends up with only its own fields, breaking hono-base inheritance.
                 let undef_lit = double_literal(f64::from_bits(crate::nanbox::TAG_UNDEFINED));
-                while lowered_args.len() < ctor.param_count {
+                while lowered_args.len() < ctor.standalone_param_count {
                     lowered_args.push(undef_lit.clone());
                 }
                 let this_slot = ctx.this_stack.last().cloned();

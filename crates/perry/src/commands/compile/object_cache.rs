@@ -437,10 +437,11 @@ fn compute_object_cache_key_with_env(
         let mut buf = String::new();
         for c in v {
             buf.push_str(&format!(
-                "{}@{}:ctor={}:own_ctor={}:instance_fields={}:parent={}:alias={}:id={}:fields={}:methods={}:method_arities={}|",
+                "{}@{}:ctor={}:standalone_ctor={}:own_ctor={}:instance_fields={}:parent={}:alias={}:id={}:fields={}:methods={}:method_arities={}|",
                 c.name,
                 c.source_prefix,
                 c.constructor_param_count,
+                c.standalone_constructor_param_count,
                 if c.has_own_constructor { "1" } else { "0" },
                 if c.has_instance_fields { "1" } else { "0" },
                 c.parent_name.as_deref().unwrap_or(""),
@@ -1221,6 +1222,7 @@ mod object_cache_tests {
             local_alias: None,
             source_prefix: "feature_ts".into(),
             constructor_param_count: 0,
+            standalone_constructor_param_count: 0,
             has_own_constructor: false,
             has_instance_fields: true,
             method_names: vec![],
@@ -1255,6 +1257,7 @@ mod object_cache_tests {
             local_alias: None,
             source_prefix: "src".into(),
             constructor_param_count: 1,
+            standalone_constructor_param_count: 1,
             has_own_constructor: true,
             has_instance_fields: true,
             method_names: vec!["bar".into()],
@@ -1274,6 +1277,7 @@ mod object_cache_tests {
             local_alias: None,
             source_prefix: "src".into(),
             constructor_param_count: 2, // different arity
+            standalone_constructor_param_count: 2,
             has_own_constructor: true,
             has_instance_fields: true,
             method_names: vec!["bar".into()],
@@ -1301,6 +1305,7 @@ mod object_cache_tests {
             local_alias: None,
             source_prefix: "src".into(),
             constructor_param_count: 1,
+            standalone_constructor_param_count: 1,
             has_own_constructor: true,
             has_instance_fields: true,
             method_names: vec!["bar".into()],
@@ -1324,6 +1329,10 @@ mod object_cache_tests {
 
         let mut changed = base.clone();
         changed.has_own_constructor = false;
+        assert_ne!(base_key, key_for(changed));
+
+        let mut changed = base.clone();
+        changed.standalone_constructor_param_count = 2;
         assert_ne!(base_key, key_for(changed));
 
         let mut changed = base.clone();

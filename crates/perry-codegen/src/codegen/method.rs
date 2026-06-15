@@ -383,7 +383,7 @@ pub(super) fn compile_method(
                         } else if let Some(ctor) =
                             ctx.imported_class_ctors.get(&pname_owned).cloned()
                         {
-                            (ctor.symbol, ctor.param_count)
+                            (ctor.symbol, ctor.standalone_param_count)
                         } else {
                             // No callable ctor symbol — bail.
                             stmt::lower_stmts(&mut ctx, &method.body).with_context(|| {
@@ -402,7 +402,7 @@ pub(super) fn compile_method(
                             return Ok(());
                         }
                     } else if let Some(ctor) = ctx.imported_class_ctors.get(&pname_owned).cloned() {
-                        (ctor.symbol, ctor.param_count)
+                        (ctor.symbol, ctor.standalone_param_count)
                     } else {
                         ("".to_string(), 0)
                     };

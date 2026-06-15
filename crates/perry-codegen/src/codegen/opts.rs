@@ -427,8 +427,11 @@ pub struct ImportedClass {
     pub local_alias: Option<String>,
     /// Symbol prefix of the origin module (for cross-module method calls).
     pub source_prefix: String,
-    /// Number of constructor parameters (needed for dispatch).
+    /// Number of parameters on the source class's explicit own constructor.
     pub constructor_param_count: usize,
+    /// Number of user parameters accepted by the emitted standalone
+    /// `<source_prefix>__<class>_constructor(this, ...)` symbol.
+    pub standalone_constructor_param_count: usize,
     /// Whether the source class declared its own constructor body.
     pub has_own_constructor: bool,
     /// Whether the source class has instance fields that require initializer replay.
@@ -495,7 +498,8 @@ pub struct ImportedClass {
 #[derive(Debug, Clone)]
 pub(crate) struct ImportedCtor {
     pub symbol: String,
-    pub param_count: usize,
+    pub own_param_count: usize,
+    pub standalone_param_count: usize,
     pub has_own_constructor: bool,
     pub has_instance_fields: bool,
 }
@@ -504,7 +508,7 @@ impl ImportedCtor {
     /// True when constructor resolution must stop at this imported class even
     /// when its standalone constructor takes zero user parameters.
     pub(crate) fn stops_constructor_walk(&self) -> bool {
-        self.param_count > 0 || self.has_own_constructor || self.has_instance_fields
+        self.own_param_count > 0 || self.has_own_constructor || self.has_instance_fields
     }
 }
 
