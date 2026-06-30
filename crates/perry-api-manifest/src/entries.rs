@@ -5007,6 +5007,7 @@ pub static API_MANIFEST: &[ApiEntry] = &[
     method("perry/ui", "appSetTimer", false, None),
     method("perry/ui", "appSetMinSize", false, None),
     method("perry/ui", "appSetMaxSize", false, None),
+    method("perry/ui", "appSetActivationPolicy", false, None),
     method("perry/ui", "embedNSView", false, None),
     method("perry/ui", "sheetCreate", false, None),
     method("perry/ui", "sheetPresent", false, None),
